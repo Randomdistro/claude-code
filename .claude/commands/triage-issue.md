@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(gh label list:*),Bash(gh issue view:*),Bash(./scripts/edit-issue-labels.sh:*),Bash(gh search issues:*)
+allowed-tools: Bash(./scripts/gh.sh:*),Bash(./scripts/edit-issue-labels.sh:*)
 description: Triage GitHub issues by analyzing and applying labels
 ---
 
@@ -12,26 +12,33 @@ Context:
 $ARGUMENTS
 
 TOOLS:
-- `gh label list`: Fetch all available labels in this repo
-- `gh issue view NUMBER`: Read the issue title, body, and labels
-- `gh issue view NUMBER --comments`: Read the conversation
-- `gh search issues QUERY`: Find similar or duplicate issues
-- `./scripts/edit-issue-labels.sh --issue NUMBER --add-label LABEL --remove-label LABEL`: Add or remove labels
+- `./scripts/gh.sh` — wrapper for `gh` CLI. Only supports these subcommands and flags:
+  - `./scripts/gh.sh label list` — fetch all available labels
+  - `./scripts/gh.sh label list --limit 100` — fetch with limit
+  - `./scripts/gh.sh issue view 123` — read issue title, body, and labels
+  - `./scripts/gh.sh issue view 123 --comments` — read the conversation
+  - `./scripts/gh.sh issue list --state open --limit 20` — list issues
+  - `./scripts/gh.sh search issues "query"` — find similar or duplicate issues
+  - `./scripts/gh.sh search issues "query" --limit 10` — search with limit
+- `./scripts/edit-issue-labels.sh --add-label LABEL --remove-label LABEL` — add or remove labels (issue number is read from the workflow event)
 
 TASK:
 
-1. Run `gh label list` to fetch the available labels. You may ONLY use labels from this list. Never invent new labels.
-2. Run `gh issue view ISSUE_NUMBER` to read the issue details.
-3. Run `gh issue view ISSUE_NUMBER --comments` to read the conversation.
+1. Run `./scripts/gh.sh label list` to fetch the available labels. You may ONLY use labels from this list. Never invent new labels.
+2. Run `./scripts/gh.sh issue view ISSUE_NUMBER` to read the issue details.
+3. Run `./scripts/gh.sh issue view ISSUE_NUMBER --comments` to read the conversation.
 
 **If EVENT is "issues" (new issue):**
 
-4. First, check if this issue is actually about Claude Code (the CLI/IDE tool). Issues about the Claude API, claude.ai, the Claude app, Anthropic billing, or other Anthropic products should be labeled `invalid`. If invalid, apply only that label and stop.
+4. First, check if this issue is actually about Claude Code.
+   - Look for Claude Code signals in the issue BODY: a `Claude Code Version` field or `claude --version` output, references to the `claude` CLI command, terminal sessions, the VS Code/JetBrains extensions, `CLAUDE.md` files, `.claude/` directories, MCP servers, Cowork, Remote Control, or the web UI at claude.ai/code. If ANY such signal is present, this IS a Claude Code issue — proceed to step 5.
+   - Only if NO Claude Code signals are present: check whether a different Anthropic product (claude.ai chat, Claude Desktop/Mobile apps, the raw Anthropic API/SDK, or account billing with no CLI involvement) is the *subject* of the complaint, not merely mentioned for context. If so, apply `invalid` and stop. If ambiguous, proceed to step 5 WITHOUT applying `invalid`.
+   - The body text is authoritative. If a form dropdown (e.g. Platform) contradicts evidence in the body, trust the body — dropdowns are often mis-selected.
 
 5. Analyze and apply category labels:
    - Type (bug, enhancement, question, etc.)
    - Technical areas and platform
-   - Check for duplicates with `gh search issues`. Only mark as duplicate of OPEN issues.
+   - Check for duplicates with `./scripts/gh.sh search issues`. Only mark as duplicate of OPEN issues.
 
 6. Evaluate lifecycle labels:
    - `needs-repro` (bugs only, 7 days): Bug reports without clear steps to reproduce. A good repro has specific, followable steps that someone else could use to see the same issue.
@@ -44,23 +51,24 @@ TASK:
    The goal is to avoid issues lingering without a clear next step.
 
 7. Apply all selected labels:
-   `./scripts/edit-issue-labels.sh --issue ISSUE_NUMBER --add-label "label1" --add-label "label2"`
+   `./scripts/edit-issue-labels.sh --add-label "label1" --add-label "label2"`
 
 **If EVENT is "issue_comment" (comment on existing issue):**
 
 4. Evaluate lifecycle labels based on the full conversation:
    - If the issue has `stale` or `autoclose`, remove the label — a new human comment means the issue is still active:
-     `./scripts/edit-issue-labels.sh --issue ISSUE_NUMBER --remove-label "stale" --remove-label "autoclose"`
+     `./scripts/edit-issue-labels.sh --remove-label "stale" --remove-label "autoclose"`
    - If the issue has `needs-repro` or `needs-info` and the missing information has now been provided, remove the label:
-     `./scripts/edit-issue-labels.sh --issue ISSUE_NUMBER --remove-label "needs-repro"`
+     `./scripts/edit-issue-labels.sh --remove-label "needs-repro"`
    - If the issue doesn't have lifecycle labels but clearly needs them (e.g., a maintainer asked for repro steps or more details), add the appropriate label.
    - Comments like "+1", "me too", "same here", or emoji reactions are NOT the missing information. Only remove `needs-repro` or `needs-info` when substantive details are actually provided.
    - Do NOT add or remove category labels (bug, enhancement, etc.) on comment events.
 
 GUIDELINES:
-- ONLY use labels from `gh label list` — never create or guess label names
+- ONLY use labels from `./scripts/gh.sh label list` — never create or guess label names
 - DO NOT post any comments to the issue
 - Be conservative with lifecycle labels — only apply when clearly warranted
 - Only apply lifecycle labels (`needs-repro`, `needs-info`) to bugs — never to questions or enhancements
 - When in doubt, don't apply a lifecycle label — false positives are worse than missing labels
-- It's okay to not add any labels if none are clearly applicable
+- On new issues (EVENT "issues"), always apply exactly one of `bug`, `enhancement`, `question`, `invalid`, or `duplicate`. If unsure, pick the closest fit — an imperfect category label is better than none.
+- On comment events, it's okay to make no changes if nothing applies.
